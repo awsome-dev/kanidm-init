@@ -136,7 +136,10 @@ async fn main() -> AppResult<()> {
                                                 // --- 外出しした関数を呼び出す ---
                                                 match save_setup_readme(&k_conf, &b_conf, &token) {
                                                     Err(e) => return Err(e),
-                                                    Ok(_) => println!("Bootstrap successful."),
+                                                    Ok(_) => {
+                                                        println!("Bootstrap successful.");
+                                                        return Ok(());
+                                                    },
                                                 }
                                             }
                                         }
@@ -148,9 +151,10 @@ async fn main() -> AppResult<()> {
                 }
             }
         }
-        Ok(count) => println!("Initial setup is already complete ({} admins found).", count),
+        Ok(count) => {
+            println!("Initial setup is already complete ({} admins found).", count);
+            return Ok(());
+        },
         Err(e) => return Err(AppError::Other(format!("Failed to check admin count: {}", e))),
     }
-
-    Ok(())
 }
