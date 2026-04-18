@@ -1,0 +1,10 @@
+[bootstrap]
+person = "default_idm_admin"
+display_person_name = "Default Administrator"
+
+app_name = "internal_admin_portal"
+display_app_name = "Internal Admin Portal"
+callback_url = "https://admin.idm.example.internal/callback"
+scopes = ["email", "profile", "openid"]
+
+readme_dir = "/data"
