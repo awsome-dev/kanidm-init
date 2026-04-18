@@ -40,14 +40,10 @@ pub struct BootstrapConfig {
 }
 
 fn default_readme_dir() -> String {
-    ".".to_string()
+    "/data".to_string()
 }
 
 // --- デフォルト値の定義 ---
-
-fn default_person() -> String {
-    "default_idm_admin".to_string()
-}
 
 fn default_display_person_name() -> String {
     "Default Administrator".to_string()
@@ -71,6 +67,10 @@ fn default_scopes() -> Vec<String> {
         "profile".to_string(),
         "openid".to_string(),
     ]
+}
+
+fn default_person() -> String {
+    "default_idm_admin".to_string()
 }
 
 impl Default for BootstrapConfig {
