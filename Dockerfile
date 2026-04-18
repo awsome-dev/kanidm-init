@@ -1,4 +1,4 @@
-# --- Stage 1: kanidm-init の静的ビルド ---
+# --- Stage 1: kanidm_init の静的ビルド ---
 FROM --platform=$BUILDPLATFORM rust:1.95-slim AS builder
 ARG TARGETPLATFORM
 WORKDIR /usr/src/init
@@ -21,15 +21,15 @@ RUN export TARGET=$(case "$TARGETPLATFORM" in "linux/amd64") echo "x86_64-unknow
     # これにより、リンカーエラー (__isoc23_sscanf 等) を回避できます
     cargo zigbuild --release --target $TARGET && \
     echo "--- Target directory structure ---" && \
-    find target -name kanidm-init -ls && \
+    find target -name kanidm_init -ls && \
     echo "--- Attempting to copy binary ---" && \
-    find target -name kanidm-init -type f -executable | grep "release" | xargs -I {} cp -v {} /usr/src/init/kanidm-init-bin
+    find target -name kanidm_init -type f -executable | grep "release" | xargs -I {} cp -v {} /usr/src/init/kanidm_init-bin
 
 # --- Stage 2: 公式イメージへの組み込み ---
 FROM docker.io/kanidm/server:latest
 
 # バイナリと起動スクリプトをコピー
-COPY --from=builder /usr/src/init/kanidm-init-bin /sbin/kanidm-init
+COPY --from=builder /usr/src/init/kanidm_init-bin /sbin/kanidm_init
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 

@@ -1,4 +1,4 @@
-# --- Stage 1: kanidm-init の静的ビルド ---
+# --- Stage 1: kanidm_init の静的ビルド ---
 FROM --platform=$BUILDPLATFORM rust:1.81-slim AS builder
 ARG TARGETPLATFORM
 WORKDIR /usr/src/init
@@ -32,14 +32,14 @@ RUN case "$TARGETPLATFORM" in \
     # ターゲット固有の CC を明示的に指定してビルド
     # openssl-sys (vendored) はこれを見てターゲット用の C コンパイルを開始する
     CC=$CC AR=$AR cargo build --release --target $TARGET && \
-    cp target/$TARGET/release/kanidm-init /usr/src/init/kanidm-init-bin
+    cp target/$TARGET/release/kanidm_init /usr/src/init/kanidm_init-bin
 
 # --- Stage 2: 公式イメージへの組み込み ---
 #FROM kanidm/kanidm:latest
 FROM docker.io/kanidm/server:latest
 
 # バイナリと起動スクリプトをコピー
-COPY --from=builder /usr/src/init/kanidm-init-bin /sbin/kanidm-init
+COPY --from=builder /usr/src/init/kanidm_init-bin /sbin/kanidm_init
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
