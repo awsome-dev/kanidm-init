@@ -16,6 +16,52 @@ struct Cli {
     account: String,
 }
 
+/// セットアップ完了後のReadMeを作成・保存する
+fn save_setup_readme(
+    k_conf: &KanidmConfig,
+    b_conf: &BootstrapConfig,
+    token: &str,
+) -> AppResult<()> {
+    let readme_content = format!(
+r#"# Kanidm Setup (Passkey / TPM / SE)
+
+Kanidm のデプロイが完了しました。以下の初期認証情報を使用してログインし、パスワードレス設定を行ってください。
+
+## 初期ログイン手順
+1. ブラウザで管理画面（ {}/ui/login ）にアクセス
+2. 以下の認証情報を入力してログイン
+    - **Username**: `{}`
+    - **Password**: `{}`
+3. ログイン後、ただちに正規のパスワードへ変更してください。
+
+## パスワードレス（WebAuthn）の設定
+1. 設定メニューから "Passkey / WebAuthn" を登録。
+2. 以降は、生体認証やセキュリティキー（指紋認証、顔認証、YubiKey等）のみでログインが可能になります。"#,
+        k_conf.origin.trim_end_matches('/'),
+        b_conf.person,
+        token
+    );
+
+    let readme_path = Path::new(&b_conf.readme_dir).join("ReadMe.md");
+
+    // ディレクトリ作成
+    if let Some(parent) = readme_path.parent() {
+        match fs::create_dir_all(parent) {
+            Err(e) => return Err(AppError::from(e).context(format!("Failed to create directory: {:?}", parent))),
+            Ok(_) => (),
+        }
+    }
+
+    // ファイル書き込み
+    match fs::write(&readme_path, readme_content) {
+        Err(e) => Err(AppError::from(e).context(format!("Failed to write ReadMe to {:?}", readme_path))),
+        Ok(_) => {
+            println!("Success! Instructions and token saved to {:?}", readme_path);
+            Ok(())
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> AppResult<()> {
     let cli = Cli::parse();
@@ -53,75 +99,49 @@ async fn main() -> AppResult<()> {
         &k_conf.origin, &k_conf.tls_chain, &cli.account, &password,
     ).await?;
 
-    // 4. 
-    println!("Starting bootstrap flow...");    
+    // 4.
+    println!("Starting bootstrap flow...");
     match person::count_admins(&client).await {
         Ok(0) => {
-            // 4-1. person::create (Conflictは許容、それ以外は中断)
-            match person::create(&client, &b_conf.person, &b_conf.display_person_name).await {
+            // 4-1 & 4-3. PersonとOAuth2の作成を並行して開始
+            // Rust 1.95では、こうした並行処理の結果をタプルで受け取り、
+            // そのままmatchで分解する記述がよりスムーズになります。
+            let (p_res, o_res) = tokio::join!(
+                person::create(&client, &b_conf.person, &b_conf.display_person_name),
+                oauth2::create(&client, &b_conf.app_name, &b_conf.display_app_name, &k_conf.origin)
+            );
+            match p_res {
                 Err(e) if !e.is_conflict() => return Err(e.context("Failed to ensure person exists")),
                 _ => {
-                    // 4-2. person::add_to_group (どんなエラーも許容。matchで囲まず、単に実行する)
+                    // 4-2. person::add_to_group (依存: person::create)
                     let _ = person::add_to_group(&client, &b_conf.person, "idm_admins").await;
-
-                    // 4-3. oauth2::create (Conflictは許容、それ以外は中断)
-                    match oauth2::create(&client, &b_conf.app_name, &b_conf.display_app_name, &k_conf.origin).await {
+                    match o_res {
                         Err(e) if !e.is_conflict() => return Err(e.context("Failed to create OAuth2 app")),
                         _ => {
-                            // 4-4. oauth2::add_redirect_url (Conflictなし。Okなら次へ)
-                            match oauth2::add_redirect_url(&client, &b_conf.app_name, &b_conf.callback_url).await {
-                                Ok(_) => {
-                                    // 4-5. oauth2::add_scopes (Conflictなし)
-                                    match oauth2::add_scopes(&client, &b_conf.app_name, &b_conf.scopes).await {
-                                        Ok(_) => {
-                                        
-                                            // 1. 最後にトークンを発行
-                                            let token = match person::generate_reset_token(&client, &b_conf.person).await {
-                                                Ok(t) => t,
-                                                Err(e) => return Err(e.context("Failed to generate reset token")),
-                                            };
-                                        
-                                            // 2. ReadMe.md の内容を作成
-                                            // k_conf.origin と b_conf.person, 発行した token を埋め込む
-                                            let readme_content = format!(
-r#"# Kanidm Setup (Passkey / TPM / SE)
-
-Kanidm のデプロイが完了しました。以下の初期認証情報を使用してログインし、パスワードレス設定を行ってください。
-
-## 初期ログイン手順
-1. ブラウザで管理画面（ {}/ui/login ）にアクセス
-2. 以下の認証情報を入力してログイン
-    - **Username**: `{}`
-    - **Password**: `{}`
-3. ログイン後、ただちに正規のパスワードへ変更してください。
-
-## パスワードレス（WebAuthn）の設定
-1. 設定メニューから "Passkey / WebAuthn" を登録。
-2. 以降は、生体認証やセキュリティキー（指紋認証、顔認証、YubiKey等）のみでログインが可能になります。"#,
-                                                k_conf.origin.trim_end_matches('/'),
-                                                b_conf.person,
-                                                token
-                                            );
-                                        
-                                            // 3. readme_dir に ReadMe.md という名称で書き込む
-                                            let readme_path = Path::new(&b_conf.readme_dir).join("ReadMe.md");
-                                            
-                                            if let Some(parent) = readme_path.parent() {
-                                                fs::create_dir_all(parent)
-                                                    .map_err(|e| AppError::from(e).context(format!("Failed to create directory: {:?}", parent)))?;
+                            // 4-4 & 4-5. Redirect URLとScopesの追加を並行実行
+                            // 依存: oauth2::create の成功
+                            let (url_res, scope_res) = tokio::join!(
+                                oauth2::add_redirect_url(&client, &b_conf.app_name, &b_conf.callback_url),
+                                oauth2::add_scopes(&client, &b_conf.app_name, &b_conf.scopes)
+                            );
+                            match url_res {
+                                Err(e) => return Err(e.context("Failed to set redirect URL")),
+                                Ok(_) => match scope_res {
+                                    Err(e) => return Err(e.context("Failed to sync scopes")),
+                                    Ok(_) => {
+                                        // 4-6. 最後にトークンを発行
+                                        match person::generate_reset_token(&client, &b_conf.person).await {
+                                            Err(e) => return Err(e.context("Failed to generate reset token")),
+                                            Ok(token) => {
+                                                // --- 外出しした関数を呼び出す ---
+                                                match save_setup_readme(&k_conf, &b_conf, &token) {
+                                                    Err(e) => return Err(e),
+                                                    Ok(_) => println!("Bootstrap successful."),
+                                                }
                                             }
-                                        
-                                            fs::write(&readme_path, readme_content)
-                                                .map_err(|e| AppError::from(e).context(format!("Failed to write ReadMe to {:?}", readme_path)))?;
-                                        
-                                            println!("Success! Instructions and token saved to {:?}", readme_path);
-                                        
-                                            println!("Bootstrap successful.")
-                                        },
-                                        Err(e) => return Err(e.context("Failed to sync scopes")),
+                                        }
                                     }
                                 }
-                                Err(e) => return Err(e.context("Failed to set redirect URL")),
                             }
                         }
                     }
