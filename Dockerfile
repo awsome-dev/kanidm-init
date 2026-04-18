@@ -21,9 +21,10 @@ RUN export TARGET=$(case "$TARGETPLATFORM" in "linux/amd64") echo "x86_64-unknow
     export CC=$(case "$TARGETPLATFORM" in "linux/amd64") echo "x86_64-linux-gnu-gcc" ;; "linux/arm64") echo "aarch64-linux-gnu-gcc" ;; esac) && \
     export AR=$(case "$TARGETPLATFORM" in "linux/amd64") echo "x86_64-linux-gnu-ar" ;; "linux/arm64") echo "aarch64-linux-gnu-ar" ;; esac) && \
     rustup target add $TARGET && \
-    # ターゲット固有の CC を明示的に指定してビルド
-    # openssl-sys (vendored) はこれを見てターゲット用の C コンパイルを開始する
-    CC=$CC AR=$AR cargo build --release --target $TARGET && \
+    CC=$CC AR=$AR \
+    OPENSSL_DIR=/usr \
+    OPENSSL_STATIC=1 \
+    cargo build --release --target $TARGET && \
     cp target/$TARGET/release/kanidm-init /usr/src/init/kanidm-init-bin
 
 # --- Stage 2: 公式イメージへの組み込み ---
