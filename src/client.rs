@@ -1,5 +1,6 @@
 use kanidm_client::{KanidmClient, KanidmClientBuilder};
 use std::path::Path;
+use crate::{execute_recovery, conf::{KanidmConfig}};
 use crate::error::{AppError, AppResult};
 
 /// AppResult に対して Conflict (HTTP 409) かどうかを判定する拡張トレイト
@@ -58,4 +59,19 @@ pub async fn create_client_with_recovery_code(
         .map_err(|e| AppError::from(e).context("Authentication failed with recovery code"))?;
 
     Ok(client)
+}
+
+/// 管理者権限を持つクライアントを作成する
+pub async fn prepare_admin_client(
+    config_path: &str,
+    account: &str,
+    k_conf: &KanidmConfig,
+) -> AppResult<KanidmClient> {
+    let password = execute_recovery(config_path, account)
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?;
+
+    create_client_with_recovery_code(
+        &k_conf.origin, &k_conf.tls_chain, account, &password,
+    ).await
 }

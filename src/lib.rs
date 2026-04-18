@@ -12,6 +12,8 @@ pub mod client;
 pub mod person;
 pub mod oauth2;
 pub mod error;
+pub mod logic;
+pub mod util;
 
 // 共通レスポンス
 #[derive(Serialize, Debug)]

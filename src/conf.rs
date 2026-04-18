@@ -1,4 +1,7 @@
+use crate::error::{AppError, AppResult};
 use serde::Deserialize;
+use std::path::Path;
+use std::fs;
 
 /// Kanidm 本体設定 (server.toml) に対応する構造
 #[derive(Deserialize, Debug, Clone)]
@@ -81,5 +84,34 @@ impl Default for BootstrapConfig {
             scopes: default_scopes(),
             readme_dir: default_readme_dir(),
         }
+    }
+}
+
+/// サーバー設定ファイルのパスを決定する
+pub fn determine_config_path(opt_path: Option<String>) -> String {
+    opt_path.unwrap_or_else(|| {
+        ["/data/server.toml", "/etc/kanidm/server.toml"]
+            .iter()
+            .find(|p| Path::new(p).exists())
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| "/data/server.toml".to_string())
+    })
+}
+
+/// Kanidmサーバー設定を読み込む
+pub fn load_kanidm_config(path: &str) -> AppResult<KanidmConfig> {
+    let toml = fs::read_to_string(path)
+        .map_err(|e| AppError::from(e).context(format!("Failed to read server config: {}", path)))?;
+    toml::from_str(&toml).map_err(|e| AppError::from(e).context("Failed to parse server TOML"))
+}
+
+/// セットアップ用の設定を読み込む
+pub fn load_bootstrap_config(path: &str) -> AppResult<BootstrapConfig> {
+    if Path::new(path).exists() {
+        let toml = fs::read_to_string(path)
+            .map_err(|e| AppError::from(e).context("Failed to read bootstrap config"))?;
+        toml::from_str(&toml).map_err(|e| AppError::from(e).context("Failed to parse bootstrap TOML"))
+    } else {
+        Ok(BootstrapConfig::default())
     }
 }
