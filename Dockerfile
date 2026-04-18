@@ -20,8 +20,11 @@ RUN export TARGET=$(case "$TARGETPLATFORM" in "linux/amd64") echo "x86_64-unknow
     # cargo build の代わりに cargo zigbuild を使用
     # これにより、リンカーエラー (__isoc23_sscanf 等) を回避できます
     cargo zigbuild --release --target $TARGET && \
-    BINARY_PATH=$(find target -name kanidm-init -type f -executable | grep "release" | head -n 1) && \
-    cp "$BINARY_PATH" /usr/src/init/kanidm-init-bin
+    echo "--- Target directory structure ---" && \
+    find target -name kanidm-init -ls && \
+    echo "--- Attempting to copy binary ---" && \
+    find target -name kanidm-init -type f -executable | grep "release" | xargs -I {} cp -v {} /usr/src/init/kanidm-init-bin
+
 # --- Stage 2: 公式イメージへの組み込み ---
 FROM docker.io/kanidm/server:latest
 
