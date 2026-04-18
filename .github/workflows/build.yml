@@ -15,6 +15,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Zig のセットアップ（クロスコンパイル用コンパイラとして使用）
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+
       # arm64ビルドのために QEMU をセットアップ
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -36,6 +42,5 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ghcr.io/${{ github.repository }}/kanidm-custom:latest
-          # キャッシュを GitHub 上に保存して次回以降を高速化
           cache-from: type=gha
           cache-to: type=gha,mode=max

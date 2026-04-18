@@ -4,31 +4,25 @@ ARG TARGETPLATFORM
 WORKDIR /usr/src/init
 COPY . .
 
-# クロスコンパイルに必要なパッケージを網羅
+# Zig と cargo-zigbuild のインストール
+# Zig が C コンパイラ (zig cc) として振る舞い、適切な musl ターゲットをリンクします
 RUN apt-get update && apt-get install -y \
-    musl-tools \
+    curl \
+    python3 \
+    python3-pip \
     pkg-config \
     libssl-dev \
-    gcc-aarch64-linux-gnu \
-    libc6-dev-arm64-cross \
-    gcc-x86-64-linux-gnu \
-    libc6-dev-amd64-cross \
-    perl \
-    make
-    
-# 変数の代入をサブシェル実行結果のキャプチャに変更し、後続コマンドへ確実に渡す
+    && pip3 install cargo-zigbuild --break-system-packages
+
+# Zig を利用したクロスビルド
 RUN export TARGET=$(case "$TARGETPLATFORM" in "linux/amd64") echo "x86_64-unknown-linux-musl" ;; "linux/arm64") echo "aarch64-unknown-linux-musl" ;; esac) && \
-    export CC=$(case "$TARGETPLATFORM" in "linux/amd64") echo "x86_64-linux-gnu-gcc" ;; "linux/arm64") echo "aarch64-linux-gnu-gcc" ;; esac) && \
-    export AR=$(case "$TARGETPLATFORM" in "linux/amd64") echo "x86_64-linux-gnu-ar" ;; "linux/arm64") echo "aarch64-linux-gnu-ar" ;; esac) && \
     rustup target add $TARGET && \
-    CC=$CC AR=$AR \
-    OPENSSL_DIR=/usr \
-    OPENSSL_STATIC=1 \
-    cargo build --release --target $TARGET && \
+    # cargo build の代わりに cargo zigbuild を使用
+    # これにより、リンカーエラー (__isoc23_sscanf 等) を回避できます
+    cargo zigbuild --release --target $TARGET && \
     cp target/$TARGET/release/kanidm-init /usr/src/init/kanidm-init-bin
 
 # --- Stage 2: 公式イメージへの組み込み ---
-#FROM kanidm/kanidm:latest
 FROM docker.io/kanidm/server:latest
 
 # バイナリと起動スクリプトをコピー
