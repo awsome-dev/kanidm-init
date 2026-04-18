@@ -12,8 +12,10 @@ RUN apt-get update && apt-get install -y \
     gcc-aarch64-linux-gnu \
     libc6-dev-arm64-cross \
     gcc-x86-64-linux-gnu \
-    libc6-dev-amd64-cross
-
+    libc6-dev-amd64-cross \
+    perl \
+    make
+    
 # 変数の代入をサブシェル実行結果のキャプチャに変更し、後続コマンドへ確実に渡す
 RUN export TARGET=$(case "$TARGETPLATFORM" in "linux/amd64") echo "x86_64-unknown-linux-musl" ;; "linux/arm64") echo "aarch64-unknown-linux-musl" ;; esac) && \
     export CC=$(case "$TARGETPLATFORM" in "linux/amd64") echo "x86_64-linux-gnu-gcc" ;; "linux/arm64") echo "aarch64-linux-gnu-gcc" ;; esac) && \
