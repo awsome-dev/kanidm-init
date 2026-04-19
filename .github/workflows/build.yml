@@ -41,6 +41,6 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/${{ github.repository }}/kanidm-custom:latest
+          tags: ghcr.io/${{ github.repository }}/kanidm-with-init:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
