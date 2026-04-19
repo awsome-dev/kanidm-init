@@ -72,6 +72,8 @@ async fn main() -> AppResult<()> {
 
     let err = StdCommand::new("/sbin/kanidmd")
         .args(&["server", "--config-path", &final_config_path])
+        .current_dir("/data")  // これを忘れると、最後のリスタートで Permission Denied になる
+        .env("HOME", "/data")   // 環境も引き継ぐ
         .exec();
 
     panic!("Failed to final exec kanidmd: {}", err);
