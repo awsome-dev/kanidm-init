@@ -27,6 +27,7 @@ pub async fn create_client_with_recovery_code(
     let mut builder = KanidmClientBuilder::new();
     builder = builder.address(uri.to_string());
 
+    /*
     // CA証明書の読み込み
     if Path::new(ca_path).exists() {
         builder = builder
@@ -46,6 +47,8 @@ pub async fn create_client_with_recovery_code(
             )));
         }
     }
+    */
+    builder = builder.danger_accept_invalid_certs(true);    
 
     // クライアントのビルド
     let client = builder
