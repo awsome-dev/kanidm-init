@@ -9,6 +9,7 @@ use std::process::Command as StdCommand;
 use tokio::process::Command as TokioCommand;
 use std::path::Path;
 use std::time::Duration;
+use std::process::Stdio;
 
 #[derive(Parser)]
 struct Cli {
@@ -35,6 +36,8 @@ async fn main() -> AppResult<()> {
     println!("Launching temporary kanidmd for initialization...");
     let mut temp_server = TokioCommand::new("/sbin/kanidmd")
         .args(&["server", "--config-path", &final_config_path])
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
         .spawn()
         .expect("Failed to launch temporary kanidmd");
 
