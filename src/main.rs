@@ -5,7 +5,10 @@ use kanidm_init::error::{AppResult};
 use kanidm_init::logic::execute_bootstrap_flow;
 
 use std::os::unix::process::CommandExt;
-use std::process::Command;
+use std::process::Command as StdCommand;
+use tokio::process::Command as TokioCommand;
+use std::path::Path;
+use std::time::Duration;
 
 #[derive(Parser)]
 struct Cli {
@@ -28,17 +31,44 @@ async fn main() -> AppResult<()> {
 
     let final_config_path = config_path.clone();
     
-    // 2. クライアントの準備 (Recovery Code発行を伴う)
-    let client = prepare_admin_client(&config_path, &cli.account, &k_conf).await?;
+    // --- 1. バックグラウンドで kanidmd を一時起動 ---
+    println!("Launching temporary kanidmd for initialization...");
+    let mut temp_server = TokioCommand::new("/sbin/kanidmd")
+        .args(&["server", "--config-path", &final_config_path])
+        .spawn()
+        .expect("Failed to launch temporary kanidmd");
 
-    // 3. ブートストラップの実行
-    execute_bootstrap_flow(client, k_conf, b_conf).await?;
+    // --- 2. Unixソケットの出現を待機 (最大30秒) ---
+    let socket_path = "/tmp/kanidmd.sock";
+    let mut found = false;
+    for i in 0..30 {
+        if Path::new(socket_path).exists() {
+            println!("Kanidm socket found. Proceeding with init.");
+            found = true;
+            break;
+        }
+        if i % 5 == 0 { println!("Waiting for kanidmd socket..."); }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 
-    // 4. kanidmd server へのプロセス移譲 (シェルを介さず PID 1 を継承)
-    println!("Starting kanidmd server...");
-    let err = Command::new("/sbin/kanidmd")
+    if found {        
+        // 2. クライアントの準備 (Recovery Code発行を伴う)
+        let client = prepare_admin_client(&config_path, &cli.account, &k_conf).await?;    
+        // 3. ブートストラップの実行
+        execute_bootstrap_flow(client, k_conf, b_conf).await?;
+        println!("--- Bootstrapping Phase Completed Successfully ---");
+    } else {
+        eprintln!("Error: Timeout waiting for kanidmd socket.");
+    }
+
+    // --- 4. 一時サーバーを終了させ、本番サーバーへ exec ---
+    println!("Restarting kanidmd as PID 1...");
+    let _ = temp_server.kill().await; // 一時プロセスを停止
+
+    let err = StdCommand::new("/sbin/kanidmd")
         .args(&["server", "--config-path", &final_config_path])
         .exec();
 
-    panic!("Failed to execute /sbin/kanidmd: {}", err);
+    panic!("Failed to final exec kanidmd: {}", err);
+
 }
