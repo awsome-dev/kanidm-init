@@ -4,12 +4,6 @@ use kanidm_init::client::prepare_admin_client;
 use kanidm_init::error::{AppResult};
 use kanidm_init::logic::execute_bootstrap_flow;
 
-use std::os::unix::process::CommandExt;
-use std::process::Command as StdCommand;
-use tokio::process::Command as TokioCommand;
-use std::time::Duration;
-use std::process::Stdio;
-
 #[derive(Parser)]
 struct Cli {
     #[arg(long)]
@@ -29,71 +23,9 @@ async fn main() -> AppResult<()> {
     let k_conf = load_kanidm_config(&config_path)?;
     let b_conf = load_bootstrap_config(&cli.setup_config)?;
 
-    let final_config_path = config_path.clone();
-    
-    // --- 1. バックグラウンドで kanidmd を一時起動 ---
-    println!("Launching temporary kanidmd for initialization...");
-    let mut temp_server = TokioCommand::new("/sbin/kanidmd")
-        .args(&["server", "--config-path", &final_config_path])
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .current_dir("/data")
-        .env("HOME", "/data")
-        .env("LD_LIBRARY_PATH", "/lib") // 共有ライブラリ解決に必須
-        .spawn()
-        .expect("Failed to launch temporary kanidmd");
+    // 2. クライアントの準備 (Recovery Code発行を伴う)
+    let client = prepare_admin_client(&config_path, &cli.account, &k_conf).await?;
 
-    // --- 2. 公式ヘルスチェックで準備完了を待機 (最大60秒) ---
-    // ソケットの存在確認ではなく、バイナリが「OK」と言うまで待つ
-    let mut is_ready = false;
-    println!("Waiting for kanidmd to pass healthcheck...");
-    
-    for i in 0..60 {
-        let check_status = TokioCommand::new("/sbin/kanidmd")
-            .args(&["scripting", "healthcheck", "--config-path", &final_config_path])
-            .current_dir("/data")
-            .env("HOME", "/data")
-            .env("LD_LIBRARY_PATH", "/lib")
-            .stdout(Stdio::null()) 
-            .stderr(Stdio::null())
-            .status()
-            .await;
-
-        if let Ok(status) = check_status {
-            if status.success() {
-                println!("Kanidm is healthy! Proceeding with init.");
-                is_ready = true;
-                break;
-            }
-        }
-        
-        if i % 5 == 0 { println!("Still waiting for kanidmd healthcheck... ({}s)", i); }
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-
-    if is_ready {        
-        // 2. クライアントの準備 (Recovery Code発行を伴う)
-        let client = prepare_admin_client(&config_path, &cli.account, &k_conf).await?;    
-        // 3. ブートストラップの実行
-        execute_bootstrap_flow(client, k_conf, b_conf).await?;
-        println!("--- Bootstrapping Phase Completed Successfully ---");
-    } else {
-        eprintln!("Error: Timeout waiting for kanidmd healthcheck.");
-        let _ = temp_server.kill().await;
-        std::process::exit(1);
-    }
-
-    // --- 4. 一時サーバーを終了させ、本番サーバーへ exec ---
-    println!("Restarting kanidmd as PID 1...");
-    let _ = temp_server.kill().await; // 一時プロセスを停止
-    let _ = tokio::time::sleep(Duration::from_secs(2)).await; // ソケット解放待ち
-
-    let err = StdCommand::new("/sbin/kanidmd")
-        .args(&["server", "--config-path", &final_config_path])
-        .current_dir("/data")
-        .env("HOME", "/data")
-        .env("LD_LIBRARY_PATH", "/lib")
-        .exec();
-
-    panic!("Failed to final exec kanidmd: {}", err);
+    // 3. ブートストラップ儀式の実行
+    execute_bootstrap_flow(client, k_conf, b_conf).await
 }

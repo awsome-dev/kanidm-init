@@ -39,4 +39,4 @@ COPY --from=builder /usr/src/init/kanidm_init-bin /sbin/kanidm_init
 # COPY --from=builder /usr/src/init/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # 既存の CMD を上書きし、entrypoint.sh を経由させる
-ENTRYPOINT ["/sbin/kanidm_init"]
+# ENTRYPOINT ["/sbin/kanidm_init"]
