@@ -12,7 +12,7 @@ pub async fn execute_bootstrap_flow(
 ) -> AppResult<()> {
     println!("Starting bootstrap flow...");
     match person::count_admins(&client).await {
-        Ok(0) => {
+        Ok(0) | Ok(1) => {
             // PersonとOAuth2の作成を並行開始
             let (p_res, o_res) = tokio::join!(
                 person::create(&client, &b_conf.person, &b_conf.display_person_name),
