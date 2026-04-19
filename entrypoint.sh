@@ -25,7 +25,7 @@ if [ -f "/data/setup.toml" ]; then
     echo "Executing kanidm_init with /data/setup.toml..."
     /sbin/kanidm_init \
         --config-path /data/server.toml \
-        --setup-toml /data/setup.toml
+        --setup-config-path /data/setup.toml
     echo "kanidm_init execution completed."
 else
     echo "Warning: /data/setup.toml not found. Skipping initialization phase."

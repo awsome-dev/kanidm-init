@@ -9,7 +9,7 @@ struct Cli {
     #[arg(long)]
     config_path: Option<String>,
     #[arg(long, default_value = "config.toml")]
-    setup_config: String,
+    setup_config_path: String,
     #[arg(long, default_value = "idm_admin")]
     account: String,
 }
@@ -21,7 +21,7 @@ async fn main() -> AppResult<()> {
     // 1. パスと設定の決定
     let config_path = determine_config_path(cli.config_path);
     let k_conf = load_kanidm_config(&config_path)?;
-    let b_conf = load_bootstrap_config(&cli.setup_config)?;
+    let b_conf = load_bootstrap_config(&cli.setup_config_path)?;
 
     // 2. クライアントの準備 (Recovery Code発行を伴う)
     let client = prepare_admin_client(&config_path, &cli.account, &k_conf).await?;
