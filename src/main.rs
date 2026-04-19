@@ -38,6 +38,8 @@ async fn main() -> AppResult<()> {
         .args(&["server", "--config-path", &final_config_path])
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
+        .current_dir("/data")
+        .env("HOME", "/data")
         .spawn()
         .expect("Failed to launch temporary kanidmd");
 
