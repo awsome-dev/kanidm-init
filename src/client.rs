@@ -48,6 +48,12 @@ pub async fn create_client_with_recovery_code(
         }
     }
     */
+    // クライアントビルドの直前に追加
+    println!("DEBUG: Connecting to URI: {}", uri);
+    println!("DEBUG: CA Path exists: {}", Path::new(ca_path).exists());
+    // もし可能なら
+    let resp = reqwest::get(uri).await;
+    println!("DEBUG: Raw connection test: {:?}", resp);
     builder = builder.danger_accept_invalid_certs(true);    
 
     // クライアントのビルド
