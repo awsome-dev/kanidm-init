@@ -4,7 +4,7 @@ use crate::{person, oauth2};
 use crate::error::{AppError, AppResult};
 use crate::util::save_setup_readme;
 
-/// セットアップのメインロジック（儀式）
+/// セットアップのメインロジック
 pub async fn execute_bootstrap_flow(
     client: KanidmClient,
     k_conf: KanidmConfig,
@@ -22,7 +22,22 @@ pub async fn execute_bootstrap_flow(
                 Err(e) if !e.is_conflict() => return Err(e.context("Failed to ensure person exists")),
                 _ => {
                     // グループ追加
-                    let _ = person::add_to_group(&client, &b_conf.person, "idm_admins").await;
+                    match person::add_to_group(&client, &b_conf.person, "idm_admins").await {
+                        Err(e) => return Err(e.context("Failed to add to group")),
+                        Ok(_) => {
+                            // グループ追加に成功したらトークンを発行
+                            match person::generate_reset_token(&client, &b_conf.person).await {
+                                Err(e) => return Err(e.context("Failed to generate reset token")),
+                                Ok(token) => {
+                                    // READMEを保存
+                                    match save_setup_readme(&k_conf, &b_conf, &token) {
+                                        Err(e) => return Err(e),
+                                        Ok(_) => println!("Group membership updated and setup README saved."),
+                                    }
+                                }
+                            }
+                        }
+                    }
                     match o_res {
                         Err(e) if !e.is_conflict() => return Err(e.context("Failed to create OAuth2 app")),
                         _ => {
@@ -36,15 +51,8 @@ pub async fn execute_bootstrap_flow(
                                 Ok(_) => match scope_res {
                                     Err(e) => return Err(e.context("Failed to sync scopes")),
                                     Ok(_) => {
-                                        // トークン発行とReadMe保存
-                                        match person::generate_reset_token(&client, &b_conf.person).await {
-                                            Err(e) => return Err(e.context("Failed to generate reset token")),
-                                            Ok(token) => {
-                                                save_setup_readme(&k_conf, &b_conf, &token)?;
-                                                println!("Bootstrap successful.");
-                                                return Ok(());
-                                            }
-                                        }
+                                        println!("Bootstrap successful.");
+                                        return Ok(());
                                     }
                                 }
                             }

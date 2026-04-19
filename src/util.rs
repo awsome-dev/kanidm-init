@@ -1,3 +1,4 @@
+use chrono::{Duration, Local};
 use crate::{conf::{KanidmConfig, BootstrapConfig}};
 use crate::error::{AppError, AppResult};
 use std::path::Path;
@@ -9,24 +10,41 @@ pub fn save_setup_readme(
     b_conf: &BootstrapConfig,
     token: &str,
 ) -> AppResult<()> {
+    // 現在時刻から1時間後の日時を計算（ローカル時間表示）
+    let expiry_time = (Local::now() + Duration::seconds(3600))
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string();
+
+    let origin = k_conf.origin.trim_end_matches('/');
+    let username = &b_conf.person;
+    
     let readme_content = format!(
 r#"# Kanidm Setup (Passkey / TPM / SE)
 
-Kanidm のデプロイが完了しました。以下の初期認証情報を使用してログインし、パスワードレス設定を行ってください。
+Kanidm のデプロイが完了しました。以下の登録用トークンを使用して、パスワードレス設定を行ってください。
 
-## 初期ログイン手順
-1. ブラウザで管理画面（ {}/ui/login ）にアクセス
-2. 以下の認証情報を入力してログイン
-    - **Username**: `{}`
-    - **Password**: `{}`
-3. ログイン後、ただちに正規のパスワードへ変更してください。
+## 初期登録手順
+1. ブラウザで以下の登録用URLにアクセスしてください。
+    > **URL**: {url}/ui/reset?token={token}
 
-## パスワードレス（WebAuthn）の設定
-1. 設定メニューから "Passkey / WebAuthn" を登録。
-2. 以降は、生体認証やセキュリティキー（指紋認証、顔認証、YubiKey等）のみでログインが可能になります。"#,
-        k_conf.origin.trim_end_matches('/'),
-        b_conf.person,
-        token
+2. 画面が表示されたら、以下のユーザー名を入力し **「Begin」** ボタンを押してください。
+    - **Username**: `{username}`
+
+3. Webauthn（Passkey）の登録プロセスが開始されます。登録が完了すると、以降は生体認証やセキュリティキー（指紋認証、顔認証、YubiKey等）のみでログインが可能になります。
+
+## 有効期限
+このトークンは以下の日時に失効します。
+- **Expiry**: {expiry} （発行から1時間）
+
+## CLIによる登録
+CLI環境からは、以下のコマンドを使用して登録することも可能です。
+```bash
+kanidm person credential use-reset-token {token}
+```"#,
+        url = origin,
+        token = token,
+        username = username,
+        expiry = expiry_time
     );
 
     let readme_path = Path::new(&b_conf.readme_dir).join("ReadMe.md");
