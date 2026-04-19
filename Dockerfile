@@ -26,17 +26,8 @@ RUN export TARGET=$(case "$TARGETPLATFORM" in "linux/amd64") echo "x86_64-unknow
     find target -name kanidm_init -type f -executable | grep "release" | xargs -I {} cp -v {} /usr/src/init/kanidm_init-bin && \
     chmod +x /usr/src/init/kanidm_init-bin
 
-# entrypoint.sh に権限を付与（Stage 2 で chmod が使えないため）
-# COPY entrypoint.sh /usr/src/init/entrypoint.sh
-# RUN chmod +x /usr/src/init/entrypoint.sh
-
 # --- Stage 2: 公式イメージへの組み込み ---
 FROM docker.io/kanidm/server:latest
 
 # バイナリをコピー
-COPY --from=builder /usr/src/init/kanidm_init-bin /sbin/kanidm_init
-# 権限付与済みのファイルを builder からコピー
-# COPY --from=builder /usr/src/init/entrypoint.sh /usr/local/bin/entrypoint.sh
-
-# 既存の CMD を上書きし、entrypoint.sh を経由させる
-# ENTRYPOINT ["/sbin/kanidm_init"]
+COPY --from=builder --chmod=0755 /usr/src/init/kanidm_init-bin /sbin/kanidm_init
