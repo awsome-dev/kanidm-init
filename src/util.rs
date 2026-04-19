@@ -47,7 +47,7 @@ kanidm person credential use-reset-token {token}
         expiry = expiry_time
     );
 
-    let readme_path = Path::new(&b_conf.readme_dir).join("ReadMe.md");
+    let readme_path = Path::new(&b_conf.readme_dir).join("ReadMe_idm.md");
 
     // ディレクトリ作成
     if let Some(parent) = readme_path.parent() {
