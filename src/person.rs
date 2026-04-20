@@ -1,5 +1,7 @@
-use crate::error::{AppError, AppResult};
 use kanidm_client::KanidmClient;
+use futures::future::try_join_all;
+use crate::error::{AppError, AppResult};
+use crate::logic::{any_has_elements, filter_new_admins, is_all_pending_logic};
 
 /// Person (ユーザー) を作成する
 pub async fn create(
@@ -93,5 +95,76 @@ pub async fn count_admins(client: &KanidmClient) -> AppResult<usize> {
     } else {
         // グループが存在しない（初期状態）
         Ok(0)
+    }
+}
+
+/// 管理者グループのメンバーIDリストを取得する
+async fn get_admin_members(client: &KanidmClient) -> AppResult<Vec<String>> {
+    match client.idm_group_get("idm_admins").await {
+        Err(e) => Err(AppError::from(e).context("Failed to get group entry")),
+        Ok(None) => Ok(vec![]),
+        Ok(Some(entry)) => {
+            match entry.attrs.get("member") {
+                Some(members) => Ok(members.clone()),
+                None => Ok(vec![]),
+            }
+        }
+    }
+}
+
+/// 指定したユーザーのWebAuthn登録状況を確認する
+pub async fn has_webauthn_registrations(client: &KanidmClient, person_id: &str) -> AppResult<bool> {
+    match client.idm_person_account_get(person_id).await {
+        Err(e) => Err(AppError::from(e).context("Failed to get person entry")),
+        Ok(None) => Ok(false),
+        Ok(Some(entry)) => {
+            Ok(any_has_elements(
+                entry.attrs.get("passkey"),
+                entry.attrs.get("attested_passkey"),
+            ))
+        }
+    }
+}
+
+// --- 3. 統合層 (Facade) : 全体を繋ぐスッキリした流れ ---
+
+/// 公開関数: ライフタイム問題を回避しつつ、論理的な流れを記述する
+pub async fn is_new_admin_webauthn_pending(client: &KanidmClient) -> AppResult<bool> {
+    let default_admin = "idm_admin";
+
+    // 1. メンバー取得
+    match get_admin_members(client).await {
+        Err(e) => Err(e),
+        Ok(members) => {
+            // 2. ターゲット抽出（ロジックを利用）
+            let targets = filter_new_admins(&members, default_admin);
+
+            // 3. 通信の実行（clientの参照を直接使うことでライフタイム問題を回避）
+            match (members.len(), targets.is_empty()) {
+                (2, false) => {
+                    let checks = targets.iter().map(|id| has_webauthn_registrations(client, id));
+                    match try_join_all(checks).await {
+                        Err(e) => Err(e),
+                        Ok(results) => Ok(is_all_pending_logic(results)),
+                    }
+                }
+                _ => Ok(false),
+            }
+        }
+    }
+}
+
+/// 管理者がWebAuthn（認証デバイス）を登録済みか判定する
+pub async fn admin_has_webauthn(client: &KanidmClient) -> AppResult<bool> {
+    match count_admins(client).await {
+        Err(e) => Err(AppError::Other(format!("Failed to check admin count: {}", e))),
+        // 1人以下の場合は、初期管理者のみなので「WebAuthn保持者はいない」とみなす
+        Ok(count) if count <= 1 => Ok(false),
+        // 2人いる場合は、新管理者が登録を終えているかを確認
+        Ok(_) => {
+            // 登録待ち（pending）なら、保持（has）は false
+            let pending = is_new_admin_webauthn_pending(client).await.unwrap_or(false);
+            Ok(!pending)
+        }
     }
 }

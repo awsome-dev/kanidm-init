@@ -1,4 +1,6 @@
 use kanidm_client::{KanidmClient};
+use futures::future::try_join_all;
+use std::future::Future;
 use crate::{conf::{KanidmConfig, BootstrapConfig}};
 use crate::{person, oauth2};
 use crate::error::{AppError, AppResult};
@@ -11,8 +13,10 @@ pub async fn execute_bootstrap_flow(
     b_conf: BootstrapConfig,
 ) -> AppResult<()> {
     println!("Starting bootstrap flow...");
-    match person::count_admins(&client).await {
-        Ok(0) | Ok(1) => {
+    // 管理者がWebAuthnを保持しているか（セットアップ完了済みか）を確認
+    match person::admin_has_webauthn(&client).await {
+        // WebAuthn保持者がいない場合（0人、1人、または2人いて未登録）
+        Ok(false) => {
             // PersonとOAuth2の作成を並行開始
             let (p_res, o_res) = tokio::join!(
                 person::create(&client, &b_conf.person, &b_conf.display_person_name),
@@ -61,10 +65,63 @@ pub async fn execute_bootstrap_flow(
                 }
             }
         }
-        Ok(count) => {
-            println!("Initial setup is already complete ({} admins found).", count);
+        // すでにWebAuthn保持者が存在する場合
+        Ok(true) => {
+            println!("Initial setup is already complete.");
             Ok(())
-        },
-        Err(e) => Err(AppError::Other(format!("Failed to check admin count: {}", e))),
+        }
+        // 判定に失敗した場合
+        Err(e) => Err(AppError::Other(format!("Failed to verify administrator status: {}", e))),
+    }
+}
+
+/// 2つのコレクション(Option)を評価し、いずれか1つでも空でない実体があるか判定する
+pub fn any_has_elements(
+    set_a: Option<&Vec<String>>,
+    set_b: Option<&Vec<String>>,
+) -> bool {
+    match (set_a, set_b) {
+        (Some(v), _) if !v.is_empty() => true,
+        (_, Some(v)) if !v.is_empty() => true,
+        _ => false,
+    }
+}
+
+/// 管理者リストから特定のIDを除外する（ターゲットの抽出）
+pub fn filter_new_admins(members: &[String], default_id: &str) -> Vec<String> {
+    members.iter().filter(|&m| m != default_id).cloned().collect()
+}
+
+/// 全員が未登録であることを判定する純粋な論理
+pub fn is_all_pending_logic(results: Vec<bool>) -> bool {
+    !results.into_iter().any(|has_reg| has_reg)
+}
+
+/// [Unit Test用] 通信を伴わず、クロージャで結果をシミュレートできるロジック
+/// F が Future を返さない(同期)か、モック用のクロージャを受け取る設計
+pub async fn is_new_admin_webauthn_pending_logic<F, Fut>(
+    members: Vec<String>,
+    default_admin: &str,
+    check_webauthn: F,
+) -> AppResult<bool>
+where
+    F: Fn(&str) -> Fut,
+    Fut: Future<Output = AppResult<bool>>,
+{
+    match members.len() {
+        2 => {
+            let targets = filter_new_admins(&members, default_admin);
+            match targets.is_empty() {
+                true => Ok(false),
+                false => {
+                    let checks = targets.iter().map(|id| check_webauthn(id));
+                    match try_join_all(checks).await {
+                        Err(e) => Err(e),
+                        Ok(results) => Ok(is_all_pending_logic(results)),
+                    }
+                }
+            }
+        }
+        _ => Ok(false),
     }
 }
