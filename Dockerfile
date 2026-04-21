@@ -1,12 +1,14 @@
-# --- Stage 1: kanidm_init の静的ビルド ---
+# syntax=docker/dockerfile:1.6
+
+# --- Stage 1: build ---
 FROM --platform=$BUILDPLATFORM rust:1.95-slim AS builder
 
 ARG TARGETPLATFORM
 WORKDIR /usr/src/init
 
-# =========================
-# ① システム依存（最小＆安定）
-# =========================
+# -------------------------
+# system deps
+# -------------------------
 RUN apt-get update && apt-get install -y \
     curl \
     python3 \
@@ -16,46 +18,52 @@ RUN apt-get update && apt-get install -y \
     gcc \
  && rm -rf /var/lib/apt/lists/*
 
-# =========================
-# ② Rustキャッシュは sccache ではなく BuildKit に寄せる
-# =========================
+# -------------------------
+# rust cache hint (BuildKit優先)
+# -------------------------
 ENV CARGO_INCREMENTAL=0
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
-# =========================
-# ③ Zig + cargo-zigbuild
-# =========================
+# -------------------------
+# zig build helper
+# -------------------------
 RUN pip3 install --no-cache-dir cargo-zigbuild --break-system-packages
 
-# =========================
-# ④ target解決
-# =========================
+# -------------------------
+# target setup
+# -------------------------
 RUN case "$TARGETPLATFORM" in \
-      "linux/amd64") echo "x86_64-unknown-linux-musl" > /tmp/target ;; \
-      "linux/arm64") echo "aarch64-unknown-linux-musl" > /tmp/target ;; \
-    esac
+    "linux/amd64") echo "x86_64-unknown-linux-musl" ;; \
+    "linux/arm64") echo "aarch64-unknown-linux-musl" ;; \
+    *) echo "unknown target" && exit 1 ;; \
+    esac > /tmp/target
 
 RUN rustup target add $(cat /tmp/target)
 
-# =========================
-# ⑤ 依存キャッシュ層（最重要）
-# =========================
+# -------------------------
+# dependency cache layer (critical)
+# -------------------------
 COPY Cargo.toml Cargo.lock ./
 
-RUN mkdir src && echo "fn main() {}" > src/main.rs
+RUN mkdir -p src && echo "fn main() {}" > src/main.rs
 RUN cargo fetch
 
-# =========================
-# ⑥ ソースコピー（最後）
-# =========================
+# -------------------------
+# source
+# -------------------------
 COPY . .
 
-# =========================
-# ⑦ ビルド
-# =========================
-RUN cargo zigbuild --release --target $(cat /tmp/target) \
- && cp target/$(cat /tmp/target)/release/kanidm_init /usr/local/bin/kanidm_init
+# -------------------------
+# build
+# -------------------------
+RUN set -eux; \
+    TARGET=$(cat /tmp/target); \
+    cargo zigbuild --release --target $TARGET; \
+    cp target/$TARGET/release/kanidm_init /usr/local/bin/kanidm_init
 
-# --- Stage 2: 公式イメージ ---
+# --- Stage 2: runtime ---
 FROM docker.io/kanidm/server:latest
 
-COPY --from=builder --chmod=0755 /usr/local/bin/kanidm_init /sbin/kanidm_init
+COPY --from=builder /usr/local/bin/kanidm_init /sbin/kanidm_init
+
+RUN chmod +x /sbin/kanidm_init
