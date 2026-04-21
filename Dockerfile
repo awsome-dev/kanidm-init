@@ -1,50 +1,39 @@
 # syntax=docker/dockerfile:1.6
 
-# --- Stage 1: build ---
 FROM --platform=$BUILDPLATFORM rust:1.95-slim AS builder
 
 ARG TARGETPLATFORM
 WORKDIR /usr/src/init
 
 # -------------------------
-# system deps
+# minimal deps（ここが速さの本体）
 # -------------------------
 RUN apt-get update && apt-get install -y \
-    curl \
-    python3 \
-    python3-pip \
     pkg-config \
     libssl-dev \
     gcc \
  && rm -rf /var/lib/apt/lists/*
 
 # -------------------------
-# rust cache hint (BuildKit優先)
-# -------------------------
-ENV CARGO_INCREMENTAL=0
-ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
-
-# -------------------------
-# zig build helper
+# Zig build only
 # -------------------------
 RUN pip3 install --no-cache-dir cargo-zigbuild --break-system-packages
 
 # -------------------------
-# target setup
+# target
 # -------------------------
 RUN case "$TARGETPLATFORM" in \
-    "linux/amd64") echo "x86_64-unknown-linux-musl" ;; \
-    "linux/arm64") echo "aarch64-unknown-linux-musl" ;; \
-    *) echo "unknown target" && exit 1 ;; \
+    linux/amd64) echo "x86_64-unknown-linux-musl" ;; \
+    linux/arm64) echo "aarch64-unknown-linux-musl" ;; \
+    *) exit 1 ;; \
     esac > /tmp/target
 
 RUN rustup target add $(cat /tmp/target)
 
 # -------------------------
-# dependency cache layer (critical)
+# dependency cache（ここが唯一の高速化ポイント）
 # -------------------------
 COPY Cargo.toml Cargo.lock ./
-
 RUN mkdir -p src && echo "fn main() {}" > src/main.rs
 RUN cargo fetch
 
@@ -54,16 +43,18 @@ RUN cargo fetch
 COPY . .
 
 # -------------------------
-# build
+# build（最速設定）
 # -------------------------
 RUN set -eux; \
     TARGET=$(cat /tmp/target); \
+    CARGO_PROFILE_RELEASE_LTO=true \
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
     cargo zigbuild --release --target $TARGET; \
-    cp target/$TARGET/release/kanidm_init /usr/local/bin/kanidm_init
+    install -m 0755 target/$TARGET/release/kanidm_init /out
 
-# --- Stage 2: runtime ---
+# -------------------------
+# runtime
+# -------------------------
 FROM docker.io/kanidm/server:latest
 
-COPY --from=builder /usr/local/bin/kanidm_init /sbin/kanidm_init
-
-RUN chmod +x /sbin/kanidm_init
+COPY --from=builder /out /sbin/kanidm_init
