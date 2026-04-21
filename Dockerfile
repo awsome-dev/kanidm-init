@@ -1,10 +1,11 @@
 # --- Stage 1: kanidm_init の静的ビルド ---
 FROM --platform=$BUILDPLATFORM rust:1.95-slim AS builder
+
 ARG TARGETPLATFORM
 WORKDIR /usr/src/init
 
 # =========================
-# ① システム依存（キャッシュレイヤー）
+# ① システム依存（最小＆安定）
 # =========================
 RUN apt-get update && apt-get install -y \
     curl \
@@ -15,56 +16,46 @@ RUN apt-get update && apt-get install -y \
     gcc \
  && rm -rf /var/lib/apt/lists/*
 
-# Zig + cargo-zigbuild
-RUN pip3 install cargo-zigbuild --break-system-packages
+# =========================
+# ② Rustキャッシュは sccache ではなく BuildKit に寄せる
+# =========================
+ENV CARGO_INCREMENTAL=0
 
 # =========================
-# ② sccache導入（Rustコンパイルキャッシュ）
+# ③ Zig + cargo-zigbuild
 # =========================
-RUN curl -L https://github.com/mozilla/sccache/releases/latest/download/sccache-x86_64-unknown-linux-musl.tar.gz \
-    | tar -xz \
- && mv sccache-*/sccache /usr/local/bin/ \
- && chmod +x /usr/local/bin/sccache
-
-ENV RUSTC_WRAPPER=sccache
-ENV SCCACHE_DIR=/root/.cache/sccache
+RUN pip3 install --no-cache-dir cargo-zigbuild --break-system-packages
 
 # =========================
-# ③ 依存定義（キャッシュ最重要）
+# ④ target解決
+# =========================
+RUN case "$TARGETPLATFORM" in \
+      "linux/amd64") echo "x86_64-unknown-linux-musl" > /tmp/target ;; \
+      "linux/arm64") echo "aarch64-unknown-linux-musl" > /tmp/target ;; \
+    esac
+
+RUN rustup target add $(cat /tmp/target)
+
+# =========================
+# ⑤ 依存キャッシュ層（最重要）
 # =========================
 COPY Cargo.toml Cargo.lock ./
 
 RUN mkdir src && echo "fn main() {}" > src/main.rs
-
-# 依存取得（ここがキャッシュポイント）
 RUN cargo fetch
 
 # =========================
-# ④ Zigターゲット準備
-# =========================
-RUN export TARGET=$(case "$TARGETPLATFORM" in \
-    "linux/amd64") echo "x86_64-unknown-linux-musl" ;; \
-    "linux/arm64") echo "aarch64-unknown-linux-musl" ;; esac) && \
-    rustup target add $TARGET
-
-# =========================
-# ⑤ ソース（最後にコピー）
+# ⑥ ソースコピー（最後）
 # =========================
 COPY . .
 
 # =========================
-# ⑥ ビルド
+# ⑦ ビルド
 # =========================
-RUN export TARGET=$(case "$TARGETPLATFORM" in \
-    "linux/amd64") echo "x86_64-unknown-linux-musl" ;; \
-    "linux/arm64") echo "aarch64-unknown-linux-musl" ;; esac) && \
-    cargo zigbuild --release --target $TARGET && \
-    find target -name kanidm_init -type f -executable | grep "release" | \
-    xargs -I {} cp -v {} /usr/src/init/kanidm_init-bin && \
-    chmod +x /usr/src/init/kanidm_init-bin
-
+RUN cargo zigbuild --release --target $(cat /tmp/target) \
+ && cp target/$(cat /tmp/target)/release/kanidm_init /usr/local/bin/kanidm_init
 
 # --- Stage 2: 公式イメージ ---
 FROM docker.io/kanidm/server:latest
 
-COPY --from=builder --chmod=0755 /usr/src/init/kanidm_init-bin /sbin/kanidm_init
+COPY --from=builder --chmod=0755 /usr/local/bin/kanidm_init /sbin/kanidm_init
